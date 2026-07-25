@@ -20,6 +20,36 @@ Relevant upstream reports:
 - [Electron: ignores XCompose settings when running natively on Wayland](https://github.com/electron/electron/issues/29345)
 - [Ubuntu bug tracker, since 2014](https://bugs.launchpad.net/ubuntu/+source/chromium-browser/+bug/1309145)
 
+## Is this for you?
+
+This project is for a fairly specific situation - check all of these before
+installing:
+
+- You've customized `~/.XCompose` to make a **single dead key + one letter**
+  produce something other than its system default (e.g. remapping
+  `dead_acute + c` so it types `ç` instead of the default `ç`... er, `ć`).
+  This does **not** cover multi-key Compose sequences (a dedicated
+  Compose/`Multi_key` key followed by two or more characters) - only
+  single-dead-key sequences are modeled here.
+- That override works in native/GTK apps (terminals, text editors) but
+  **not** in Chrome, Chromium, or any Electron app (VS Code, Slack, Discord,
+  Claude Desktop, ...) specifically.
+- You're on **Linux with systemd** (`keyd` runs as a systemd system
+  service).
+- You're on **Wayland or X11** - both are supported (X11 support is less
+  tested; see **Known limitations**).
+- Ideally you're using a keyboard layout with dead keys, like an `intl`
+  XKB variant (check with `localectl status` - if `X11 Variant` says
+  `intl` or similar, that's you). The technique itself generalizes to
+  *any* physical key you designate as the trigger, dead-key layout or not
+  - see **Customizing**.
+
+If your actual problem is different (e.g. you need multi-key Compose
+sequences, or a completely different input method), this project's specific
+scripts won't directly apply, but the core idea - intercept at the raw
+input-device level with `keyd`, since Chromium ignores `~/.XCompose`
+entirely regardless of what's in it - still holds.
+
 ## The fix
 
 Since the fix can't happen inside Chromium, it happens *before* Chromium (or
@@ -73,12 +103,29 @@ different layout/dead key, see **Customizing** below.
 
 ## Requirements
 
-- Arch-based distro (Manjaro, Arch, etc.) with `pacman` - `install.sh` uses
-  it directly. On other distros, install `keyd`, `wl-clipboard`, `ydotool`,
-  and `python-evdev` (or your distro's equivalents) yourself, then run
-  `generate-keyd-config.py` manually (see below).
-- A Wayland session (the clipboard/paste trick uses `wl-copy`/`wl-paste`).
-- systemd (for the `keyd` system service and the `ydotool` user service).
+- **Linux with systemd** (for the `keyd` system service and the `ydotool`
+  user service) and either **Wayland or X11** (both supported, see below -
+  X11 is less tested).
+- Four packages: `keyd`, `wl-clipboard` (Wayland) or `xclip` (X11),
+  `ydotool`, and `python-evdev`. `install.sh` auto-detects `pacman`/`apt`/
+  `dnf` and installs what it can; here's exact, verified availability if you
+  need to install manually or `install.sh` can't cover your case:
+
+  | Package | Arch/Manjaro | Debian | Ubuntu | Fedora |
+  |---|---|---|---|---|
+  | `keyd` | `pacman -S keyd` | `apt install keyd` (13/trixie+) | `apt install keyd` (25.10/questing+) | not official; `dnf copr enable alternateved/keyd && dnf install keyd` |
+  | `wl-clipboard` | `pacman -S wl-clipboard` | `apt install wl-clipboard` (10/buster+) | `apt install wl-clipboard` (20.04+) | `dnf install wl-clipboard` |
+  | `xclip` (X11 alt.) | `pacman -S xclip` | `apt install xclip` | `apt install xclip` | `dnf install xclip` |
+  | `ydotool` | `pacman -S ydotool` | `apt install ydotool` (11/bullseye+) | `apt install ydotool` (22.04+) | `dnf install ydotool` |
+  | `python-evdev` | `pacman -S python-evdev` | `apt install python3-evdev` (11/bullseye+) | `apt install python3-evdev` (22.04+) | `dnf install python3-evdev` |
+
+  On an older Debian/Ubuntu release than listed, `keyd` has no official
+  package or PPA as of this writing - build it from source per
+  [keyd's own instructions](https://github.com/rvaiya/keyd#installation)
+  (`git clone`, `make`, `sudo make install`, `systemctl enable --now keyd`).
+  For any distro/version, `pip install evdev` is a universal fallback for
+  `python-evdev` (needs a C compiler and Python/Linux dev headers - see
+  [python-evdev's install docs](https://python-evdev.readthedocs.io/en/latest/install.html)).
 
 ## Install
 
@@ -87,7 +134,11 @@ different layout/dead key, see **Customizing** below.
 ```
 
 This will:
-1. Install `keyd`, `wl-clipboard`, `ydotool`, `python-evdev`.
+1. Detect your package manager (`pacman`, `apt`, or `dnf`) and install
+   `keyd`, a clipboard tool (`wl-clipboard` on Wayland, `xclip` on X11),
+   `ydotool`, and `python-evdev` - see the table above for exact
+   availability; on Fedora this enables the `alternateved/keyd` COPR repo
+   for `keyd` specifically, since it isn't in Fedora's official repos.
 2. Install `type-accent.sh` and `shift-state-daemon.py` to `/usr/local/bin/`.
 3. Install and enable the `keyd-shift-state` system service (runs as root -
    reading `/dev/input/event*` needs either root or the `input` group with a
@@ -102,6 +153,11 @@ This will:
 If ydotool silently fails to inject the paste keystroke after install, log
 out and back in - group membership changes need a fresh login session on
 some systems.
+
+Only the Arch/pacman path has actually been run end-to-end; the apt/dnf
+paths use verified package names and commands but haven't been tested on
+real Debian/Ubuntu/Fedora installs - please open an issue if something's
+wrong.
 
 **Test:** press apostrophe, release, then press `c` &rarr; should type `ç`.
 Press apostrophe then Shift+`c` &rarr; should type `Ç`. Press apostrophe
@@ -146,11 +202,19 @@ python3 generate-keyd-config.py /usr/local/bin/type-accent.sh | sudo tee /etc/ke
 sudo keyd reload
 ```
 
-If your dead key is bound to a different physical key (not apostrophe), or
-if you use a different XKB variant entirely, change the
-`apostrophe = oneshot(cedilla)` line (and the `[cedilla]` section's
-`space`/`apostrophe` fallback entries) in `generate-keyd-config.py`
-accordingly.
+If your dead key is bound to a different physical key (not apostrophe) -
+say you use `grave` for `dead_grave`/`dead_tilde`, or any other single key
+that acts as a dead key in your layout - change `TRIGGER_KEY` and
+`TRIGGER_CHAR` at the top of `generate-keyd-config.py`:
+
+```python
+TRIGGER_KEY = "grave"   # run `keyd list-keys` for valid names
+TRIGGER_CHAR = "`"      # the literal character that key normally produces alone
+```
+
+Everything else (the oneshot layer, space/double-tap fallbacks, the
+`CEDILLA_ACCENTS`/`NATIVE_COMPOSE_LETTERS` split) is generated relative to
+these two values, so you shouldn't need to touch anything else.
 
 ## Performance
 
@@ -177,6 +241,20 @@ typing speed.
 
 ## Known limitations
 
+- **Apps running via XWayland (not native Wayland) may not work correctly**,
+  even for `NATIVE_COMPOSE_LETTERS`. XWayland keeps its own X11 keyboard
+  mapping, separate from the native Wayland session's - on at least one
+  system, XWayland reported a plain `us` layout with no `intl` variant while
+  the real session used `us(intl)`. Since this project's dead-key replay
+  (`macro(apostrophe e)`, etc.) depends on the receiving side interpreting
+  those keycodes the same way the compositor does, a mismatched XWayland
+  keymap breaks it - this is a system/compositor configuration issue, not
+  something fixable in this project's config. Check whether an app is
+  affected by inspecting its process environment for
+  `QT_QPA_PLATFORM=xcb` (Qt apps) or by comparing
+  `DISPLAY=:1 setxkbmap -query` (adjust the display number) against your
+  session's real layout. Known affected: WPS Office. Native Wayland apps
+  (Chrome, Electron apps, most GTK/Qt-Wayland apps) are unaffected.
 - **Characters routed through `type-accent.sh` (`CEDILLA_ACCENTS`) don't
   reliably support "rolling" fast typing** - releasing apostrophe before
   the next key, rather than releasing it first. This is an
@@ -200,11 +278,13 @@ typing speed.
   restored - if something reads your clipboard in that ~50ms window, it
   could see the accented character instead of your actual clipboard
   content. In practice this hasn't been an issue, but it's not atomic.
-- `type-accent.sh` finds your session via the first `/run/user/*/wayland-0`
-  socket it finds. On a multi-user system with several simultaneous
-  graphical sessions, it may pick the wrong one.
-- Only tested on Manjaro KDE Plasma (Wayland). Should work on any
-  systemd + Wayland setup, but other compositors aren't verified.
+- `type-accent.sh` finds your session via the first `/run/user/*/.ydotool_socket`
+  it finds. On a multi-user system with several simultaneous graphical
+  sessions, it may pick the wrong one.
+- Only tested on Manjaro KDE Plasma (Wayland). Should work on other systemd
+  + Wayland desktop environments; X11 support (via `xclip`) is implemented
+  but untested end-to-end, and other compositors/window managers aren't
+  verified.
 - If you ever run `shift-state-daemon.py` manually or as a user-level
   service before switching it to the root system service (as happened
   during development), delete `/dev/shm/keyd-shift-state` before starting

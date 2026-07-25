@@ -1,23 +1,48 @@
 #!/bin/bash
 # Installs the Chromium/Electron dead-key workaround described in README.md.
 #
-# Assumes an Arch-based distro (pacman) with a KDE/GNOME-style Wayland
-# session where systemd manages the user session. Tested on Manjaro KDE
-# Plasma Wayland with the us(intl) XKB variant.
+# Detects pacman (Arch/Manjaro), apt (Debian/Ubuntu), or dnf (Fedora) and
+# installs accordingly - see README.md's Requirements table for exact
+# package availability per distro/release. Only the pacman path has been
+# tested end-to-end; apt/dnf use verified package names but are otherwise
+# unverified - please open an issue if something's wrong for your distro.
+#
+# Requires systemd, and either Wayland or X11 (auto-detected via
+# WAYLAND_DISPLAY - if unset, assumes X11 and installs xclip instead of
+# wl-clipboard).
 set -euo pipefail
-
-if ! command -v pacman >/dev/null; then
-  echo "This installer uses pacman (Arch/Manjaro). Install keyd, wl-clipboard," >&2
-  echo "ydotool, and python-evdev manually for other distros, then run" >&2
-  echo "generate-keyd-config.py yourself and follow the manual steps in README.md." >&2
-  exit 1
-fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_BIN="/usr/local/bin/type-accent.sh"
 
-echo "== Installing packages: keyd wl-clipboard ydotool python-evdev =="
-sudo pacman -S --needed keyd wl-clipboard ydotool python-evdev
+if [ -n "${WAYLAND_DISPLAY:-}" ]; then
+  CLIPBOARD_PKG="wl-clipboard"
+else
+  CLIPBOARD_PKG="xclip"
+  echo "No WAYLAND_DISPLAY detected - assuming X11 and installing xclip instead of wl-clipboard."
+  echo "(X11 support is less tested than Wayland - see README's Known limitations.)"
+fi
+
+if command -v pacman >/dev/null; then
+  echo "== Installing packages via pacman: keyd $CLIPBOARD_PKG ydotool python-evdev =="
+  sudo pacman -S --needed keyd "$CLIPBOARD_PKG" ydotool python-evdev
+elif command -v apt >/dev/null; then
+  echo "== Installing packages via apt: keyd $CLIPBOARD_PKG ydotool python3-evdev =="
+  echo "   (keyd needs Debian 13/trixie+ or Ubuntu 25.10/questing+ - see README if this fails)"
+  sudo apt update
+  sudo apt install -y keyd "$CLIPBOARD_PKG" ydotool python3-evdev
+elif command -v dnf >/dev/null; then
+  echo "== keyd isn't in Fedora's official repos - enabling the alternateved/keyd COPR =="
+  sudo dnf copr enable -y alternateved/keyd
+  echo "== Installing packages via dnf: keyd $CLIPBOARD_PKG ydotool python3-evdev =="
+  sudo dnf install -y keyd "$CLIPBOARD_PKG" ydotool python3-evdev
+else
+  echo "No supported package manager found (pacman/apt/dnf)." >&2
+  echo "Install keyd, $CLIPBOARD_PKG, ydotool, and python-evdev manually (see README's" >&2
+  echo "Requirements table), then run generate-keyd-config.py yourself and follow the" >&2
+  echo "manual steps in README.md." >&2
+  exit 1
+fi
 
 echo "== Installing $INSTALL_BIN =="
 sudo install -Dm755 "$SCRIPT_DIR/type-accent.sh" "$INSTALL_BIN"
