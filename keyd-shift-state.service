@@ -1,0 +1,11 @@
+[Unit]
+Description=Tracks physical Shift key state for type-accent.sh
+After=multi-user.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/shift-state-daemon.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
