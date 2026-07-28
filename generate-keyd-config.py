@@ -69,13 +69,19 @@ TRIGGER_CHAR = "'"
 SCRIPT_ACCENTS = {
     'c': ('ç', 'Ç'),
     'e': ('é', 'É'),
+    'a': ('á', 'Á'),
+    'i': ('í', 'Í'),
+    'o': ('ó', 'Ó'),
+    'u': ('ú', 'Ú'),
 }
 
 # Characters that already compose correctly via the OS's native dead-key
 # handling (in every app, Chromium included) - kept fast and rolling-tolerant
 # by delegating back to it instead of reimplementing them here. Shares the
-# same Shift+uppercase risk as any letter here - see module docstring.
-NATIVE_COMPOSE_LETTERS = ['a', 'i', 'o', 'u']
+# same Shift+uppercase risk as any letter here - see module docstring. Empty
+# for now: every vowel this project actually uses turned out to need the
+# Shift fix once tested (Shift+a/i/o/u produced Ä/Ï/Ö/Ü, the same bug e had).
+NATIVE_COMPOSE_LETTERS = []
 
 FALLBACK_LETTERS = [
     c for c in "bdfghjklmnpqrstvwxyz"

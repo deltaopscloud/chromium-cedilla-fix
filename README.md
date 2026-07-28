@@ -60,32 +60,35 @@ any app) ever sees the keystrokes:
    (`/dev/input`), before X11/Wayland/any app sees it.
 2. Pressing apostrophe arms a one-shot layer. The next keypress determines
    what happens:
-   - `c` and `e` (`SCRIPT_ACCENTS`) &rarr; run `type-accent.sh`, which
-     briefly puts the accented character on the clipboard and simulates a
-     paste via [ydotool](https://github.com/ouges/ydotool). `c` is here
-     because it's the one character Chromium's bug actually breaks; `e` is
-     here because `Shift+e` (for an uppercase `É`) hit a *different* bug -
-     see **Known limitations** - that this same clipboard-paste mechanism
-     happens to sidestep too, since it decides the character up front from
-     Shift state rather than replaying a modifiable keycode.
-   - `a/i/o/u` (`NATIVE_COMPOSE_LETTERS`) &rarr; re-emit the physical
-     apostrophe keycode followed by the letter (`macro(apostrophe a)`,
-     etc.), delegating straight back to the OS's own dead-key handling -
-     which already produces `á í ó ú` correctly in every app, Chromium
-     included, and is faster and rolling-tolerant. They carry the same
-     Shift+uppercase risk `e` had before it was moved to `SCRIPT_ACCENTS`
-     (see **Known limitations**) - this project just hasn't needed to fix
-     it for these specific letters yet.
+   - `c` and every vowel `e/a/i/o/u` (`SCRIPT_ACCENTS`) &rarr; run
+     `type-accent.sh`, which briefly puts the accented character on the
+     clipboard and simulates a paste via
+     [ydotool](https://github.com/ouges/ydotool). `c` is here because it's
+     the one character Chromium's bug actually breaks; the vowels are here
+     because `Shift+vowel` (e.g. `Shift+e` for an uppercase `É`) hits a
+     *different* bug - see **Known limitations** - that this same
+     clipboard-paste mechanism happens to sidestep too, since it decides
+     the character up front from Shift state rather than replaying a
+     modifiable keycode. The trade-off: this path doesn't reliably support
+     "rolling" fast typing (pressing the next key before releasing
+     apostrophe) - see **Known limitations** - so you need to release
+     apostrophe before the vowel/letter for these to compose correctly.
    - `space` &rarr; types a literal apostrophe followed by a real space.
    - Everything else (other letters, digits, punctuation, arrows,
      Backspace, Enter, ...) falls back to "type apostrophe, then whatever
      you pressed", so ordinary typing (`don't`, `isn't`, `you're`, ...)
      keeps working exactly as before.
 
-   An earlier version of this project routed all the vowels through
-   `type-accent.sh`, then moved them all to the native path, then moved
-   just `e` back - see **Customizing** for how to decide, per letter,
-   which path is worth it for you.
+   This project went back and forth on where to draw this line: all
+   vowels through `type-accent.sh`, then all on the native path, then just
+   `e` on `type-accent.sh`, and finally all vowels back on
+   `type-accent.sh` once it turned out `Shift+a/i/o/u` had the exact same
+   bug as `Shift+e` (producing `Ä/Ï/Ö/Ü` instead of `Á/Í/Ó/Ú`). Landed here
+   because correctness regardless of Shift mattered more than rolling-typing
+   support for this project's actual usage - see **Customizing** if your
+   priorities differ and you want some letters on the faster native path
+   instead (`NATIVE_COMPOSE_LETTERS` is currently empty, but still
+   supported).
 3. A small background daemon, `shift-state-daemon.py`, continuously tracks
    whether Shift is physically held and writes `0`/`1` to
    `/dev/shm/keyd-shift-state`. `type-accent.sh` reads that file to decide
@@ -188,19 +191,26 @@ in matters a lot (see **Known limitations** for why):
   rolling-tolerant native path. These are equally exposed to the
   Shift+uppercase risk described in **Known limitations** - move a letter
   to `SCRIPT_ACCENTS` if that risk matters more than speed for it. (In this
-  project's own use, `e` ended up in `SCRIPT_ACCENTS` for exactly this
-  reason, while `a`/`i`/`o`/`u` stayed native.)
+  project's own use, every vowel ended up in `SCRIPT_ACCENTS` - `Shift+e`
+  hitting the bug first, then `Shift+a/i/o/u` turning out to have the exact
+  same issue once tested. `NATIVE_COMPOSE_LETTERS` is currently empty, but
+  the mechanism is still there if rolling-typing speed matters more than
+  Shift-correctness for some letter in your case.)
 
-For example, to add Spanish's `ñ` on the fast path (assuming it composes
-fine natively, which it should unless you've seen it collide with
+For example, to add Spanish's `ñ` on the fast native path (assuming it
+composes fine natively, which it should unless you've seen it collide with
 something) alongside the current setup:
 
 ```python
 SCRIPT_ACCENTS = {
     'c': ('ç', 'Ç'),
     'e': ('é', 'É'),
+    'a': ('á', 'Á'),
+    'i': ('í', 'Í'),
+    'o': ('ó', 'Ó'),
+    'u': ('ú', 'Ú'),
 }
-NATIVE_COMPOSE_LETTERS = ['a', 'i', 'o', 'u', 'n']
+NATIVE_COMPOSE_LETTERS = ['n']
 ```
 
 Then regenerate and reinstall the config:
@@ -276,9 +286,12 @@ typing speed.
   since it decides the character from a Shift state file check *before*
   deciding what to emit, rather than replaying a modifiable keycode - this
   is why `e` ended up there in this project's own config, once `Shift+e`
-  producing `Ë` instead of `É` actually came up in practice.
-  `a`/`i`/`o`/`u` are equally at risk but stayed on the fast native path;
-  move any of them to `SCRIPT_ACCENTS` too if it matters for you.
+  producing `Ë` instead of `É` actually came up in practice - and
+  `Shift+a/i/o/u` turned out to have the exact same bug
+  (`Ä`/`Ï`/`Ö`/`Ü` instead of `Á`/`Í`/`Ó`/`Ú`) once tested, so all five
+  vowels ended up in `SCRIPT_ACCENTS` in this project's own config.
+  `NATIVE_COMPOSE_LETTERS` is empty here, but the mechanism (and this same
+  risk) still applies to anything you add to it.
 - **A real, since-fixed bug from the first fix attempt, documented as a
   warning for future attempts**: routing `NATIVE_COMPOSE_LETTERS` through
   an external script that uses ydotool to re-emit the trigger keycode
