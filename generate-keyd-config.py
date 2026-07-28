@@ -31,15 +31,26 @@ Known trade-off of this native path: `macro($TRIGGER_KEY <letter>)` doesn't
 clear ambient modifiers, so holding Shift for an uppercase letter (e.g.
 Shift+e for "É") also applies to the synthetic trigger-key emission - under
 us(intl), apostrophe unshifted is dead_acute but apostrophe *shifted* is
-dead_diaeresis, so this can produce "Ë" instead of "É". Fixing this
-correctly requires routing through an external script (à la
-type-accent.sh) to explicitly manage Shift around the trigger-key emission,
-which reintroduces real latency (~50-100ms) for characters that don't
-otherwise need it. This project intentionally keeps
-NATIVE_COMPOSE_LETTERS on the fast, simple, occasionally-wrong-on-uppercase
-path rather than the slower, always-correct one - if you'd rather have it
-always correct, look at how CEDILLA_ACCENTS/type-accent.sh do it and adapt
-that pattern for your own letters.
+dead_diaeresis, so this can produce "Ë" instead of "É".
+
+Two attempts were made to fix this correctly and both failed for what
+appears to be the same underlying reason: an external script
+(compose-native.sh, since removed) tried to synthetically release Shift via
+ydotool's own virtual device before re-emitting the trigger key. This
+consistently failed to change the output (same failure mode as trying the
+same trick around type-accent.sh's clipboard-paste for a different app).
+The working theory: keyd's own virtual output device continuously forwards
+your *real* Shift key's held state (keyd exclusively grabs the real
+keyboard, so its virtual device is the sole source the compositor sees for
+it), and a *separate* device (ydotool) asserting "Shift up" doesn't override
+that - compositors appear to treat a modifier as held if any contributing
+input device asserts it, not "most recent event wins". A fix would need to
+happen through keyd's own output stream, not a separate synthetic device,
+and keyd's macro() syntax has no documented way to clear/restore a
+modifier's ambient state mid-macro. This project accepts the trade-off
+(NATIVE_COMPOSE_LETTERS stays fast and simple, occasionally wrong on
+Shift+letter) rather than continue chasing an unclear fix - see git history
+if you want to pick this up.
 
 An earlier version of this script routed ALL accented letters through
 type-accent.sh, reasoning that once keyd owns the trigger key at all,

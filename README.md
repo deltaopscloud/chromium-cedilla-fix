@@ -247,14 +247,35 @@ typing speed.
   clear ambient modifiers: if Shift is held for the uppercase letter, it
   also applies to the synthetic trigger-key emission, and under `us(intl)`
   apostrophe unshifted is `dead_acute` but apostrophe *shifted* is
-  `dead_diaeresis`. This was deliberately left unfixed - fixing it correctly
-  requires routing through an external script to explicitly manage Shift
-  (the same pattern `type-accent.sh`/`CEDILLA_ACCENTS` uses), which
-  reintroduces real latency for characters that don't otherwise need it.
-  This project prioritizes keeping `NATIVE_COMPOSE_LETTERS` fast and simple
-  over handling this less-common case - if it matters for your use case,
-  adapt the `CEDILLA_ACCENTS`/`type-accent.sh` pattern for the affected
-  letters instead.
+  `dead_diaeresis`.
+
+  Two attempts were made to fix this properly (see git history) and both
+  failed the same way: an external script tried to synthetically release
+  Shift via ydotool's own virtual device before re-emitting the trigger
+  key (the first attempt also had a separate, real bug - see below - but
+  even once that was fixed, the output was still wrong). The working
+  theory: keyd exclusively grabs your real keyboard and its own virtual
+  device is the sole thing the compositor sees for it, continuously
+  forwarding whatever Shift state your real key is in. A *different*
+  device (ydotool) asserting "Shift up" doesn't appear to override that -
+  compositors seem to treat a modifier as held if any contributing device
+  asserts it, not "most recent event wins". A real fix would need to
+  happen through keyd's own output stream, and keyd's `macro()` syntax has
+  no documented way to clear/restore a modifier mid-macro. This is left as
+  an accepted trade-off rather than a broken promise - `NATIVE_COMPOSE_LETTERS`
+  stays fast and simple; if this matters for your use case, adapt the
+  `CEDILLA_ACCENTS`/`type-accent.sh` pattern (which correctly handles Shift
+  via a state file check *before* deciding what to emit, not via a
+  post-hoc modifier release) for the affected letters instead.
+- **A real, since-fixed bug from the first fix attempt, documented as a
+  warning for future attempts**: routing `NATIVE_COMPOSE_LETTERS` through
+  an external script that uses ydotool to re-emit the trigger keycode
+  requires excluding ydotool's own virtual device
+  (`2333:6666`) from keyd's `[ids]` matching. Without it, keyd (matching
+  `[ids] *`) also grabs ydotool's virtual device, so the injected
+  trigger-key event gets fed back into keyd's own input processing and
+  recursively re-arms the dead-key layer - this broke *all* letters, not
+  just the Shift-held case being fixed.
 - **Apps running via XWayland (not native Wayland) may not work correctly**,
   even for `NATIVE_COMPOSE_LETTERS`. XWayland keeps its own X11 keyboard
   mapping, separate from the native Wayland session's - on at least one
