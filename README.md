@@ -60,33 +60,32 @@ any app) ever sees the keystrokes:
    (`/dev/input`), before X11/Wayland/any app sees it.
 2. Pressing apostrophe arms a one-shot layer. The next keypress determines
    what happens:
-   - `c` (the *only* character actually broken by Chromium's bug - see
-     below) &rarr; runs `type-accent.sh`, which briefly puts `ç`/`Ç` on the
-     clipboard and simulates a paste via
-     [ydotool](https://github.com/ouges/ydotool). This sidesteps Chromium's
-     compose bug entirely, since "paste text" isn't dead-key composition at
-     all.
-   - `e/a/i/o/u` &rarr; re-emits the physical apostrophe keycode followed by
-     the letter (`macro(apostrophe e)`, etc.), delegating straight back to
-     the OS's own dead-key handling - which already produces `é á í ó ú`
-     correctly in every app, Chromium included. These were never broken, so
-     they don't pay the clipboard-paste cost and keep the OS's native
-     compose engine's tolerance for fast/rolling typing (see **Known
-     limitations**).
+   - `c` and `e` (`SCRIPT_ACCENTS`) &rarr; run `type-accent.sh`, which
+     briefly puts the accented character on the clipboard and simulates a
+     paste via [ydotool](https://github.com/ouges/ydotool). `c` is here
+     because it's the one character Chromium's bug actually breaks; `e` is
+     here because `Shift+e` (for an uppercase `É`) hit a *different* bug -
+     see **Known limitations** - that this same clipboard-paste mechanism
+     happens to sidestep too, since it decides the character up front from
+     Shift state rather than replaying a modifiable keycode.
+   - `a/i/o/u` (`NATIVE_COMPOSE_LETTERS`) &rarr; re-emit the physical
+     apostrophe keycode followed by the letter (`macro(apostrophe a)`,
+     etc.), delegating straight back to the OS's own dead-key handling -
+     which already produces `á í ó ú` correctly in every app, Chromium
+     included, and is faster and rolling-tolerant. They carry the same
+     Shift+uppercase risk `e` had before it was moved to `SCRIPT_ACCENTS`
+     (see **Known limitations**) - this project just hasn't needed to fix
+     it for these specific letters yet.
    - `space` &rarr; types a literal apostrophe followed by a real space.
    - Everything else (other letters, digits, punctuation, arrows,
      Backspace, Enter, ...) falls back to "type apostrophe, then whatever
      you pressed", so ordinary typing (`don't`, `isn't`, `you're`, ...)
      keeps working exactly as before.
 
-   An earlier version of this project routed the vowels through
-   `type-accent.sh` too, reasoning that once keyd owns the apostrophe key,
-   nothing else can compose natively. That's only true for characters you
-   explicitly special-case - everything else can delegate straight back to
-   the OS. Only special-case a character here if you've actually confirmed
-   Chromium breaks it (test it in `~/.XCompose` first, per the "problem"
-   section above); routing more than necessary through the clipboard-paste
-   path costs both speed and rolling-typing support for no reason.
+   An earlier version of this project routed all the vowels through
+   `type-accent.sh`, then moved them all to the native path, then moved
+   just `e` back - see **Customizing** for how to decide, per letter,
+   which path is worth it for you.
 3. A small background daemon, `shift-state-daemon.py`, continuously tracks
    whether Shift is physically held and writes `0`/`1` to
    `/dev/shm/keyd-shift-state`. `type-accent.sh` reads that file to decide
@@ -175,24 +174,33 @@ contraction like `don't` to confirm normal typing still works.
 `generate-keyd-config.py` has two lists, and which one a character belongs
 in matters a lot (see **Known limitations** for why):
 
-- `CEDILLA_ACCENTS` - characters that get the clipboard-paste treatment.
-  Only put a character here if you've *confirmed* Chromium's compose bug
-  actually breaks it (e.g. it collides with a system default, the way
-  `dead_acute+c` defaults to `ć` instead of `ç`). This is the slow
-  (~130ms), rolling-typing-unfriendly path - use it as little as possible.
+- `SCRIPT_ACCENTS` - characters routed through `type-accent.sh`'s
+  clipboard-paste trick. Put a character here for either of two reasons:
+  (1) you've *confirmed* Chromium's compose bug actually breaks it (e.g. it
+  collides with a system default, the way `dead_acute+c` defaults to `ć`
+  instead of `ç`), or (2) you want `Shift+letter` (e.g. `Shift+e` for an
+  uppercase accented vowel) to reliably produce the right character - see
+  **Known limitations** for why the native path can get this wrong. This
+  is the slower (~130ms), rolling-typing-unfriendly path, but it's the only
+  one immune to both problems.
 - `NATIVE_COMPOSE_LETTERS` - characters that already compose correctly via
-  the OS's own dead-key handling in every app. This is the fast, instant,
-  rolling-tolerant path - prefer it whenever a character isn't actually
-  broken.
+  the OS's own dead-key handling in every app, kept on the fast, instant,
+  rolling-tolerant native path. These are equally exposed to the
+  Shift+uppercase risk described in **Known limitations** - move a letter
+  to `SCRIPT_ACCENTS` if that risk matters more than speed for it. (In this
+  project's own use, `e` ended up in `SCRIPT_ACCENTS` for exactly this
+  reason, while `a`/`i`/`o`/`u` stayed native.)
 
-For example, to add Spanish's `ñ` (assuming it composes fine natively,
-which it should unless you've seen it collide with something):
+For example, to add Spanish's `ñ` on the fast path (assuming it composes
+fine natively, which it should unless you've seen it collide with
+something) alongside the current setup:
 
 ```python
-CEDILLA_ACCENTS = {
+SCRIPT_ACCENTS = {
     'c': ('ç', 'Ç'),
+    'e': ('é', 'É'),
 }
-NATIVE_COMPOSE_LETTERS = ['e', 'a', 'i', 'o', 'u', 'n']
+NATIVE_COMPOSE_LETTERS = ['a', 'i', 'o', 'u', 'n']
 ```
 
 Then regenerate and reinstall the config:
@@ -213,7 +221,7 @@ TRIGGER_CHAR = "`"      # the literal character that key normally produces alone
 ```
 
 Everything else (the oneshot layer, space/double-tap fallbacks, the
-`CEDILLA_ACCENTS`/`NATIVE_COMPOSE_LETTERS` split) is generated relative to
+`SCRIPT_ACCENTS`/`NATIVE_COMPOSE_LETTERS` split) is generated relative to
 these two values, so you shouldn't need to touch anything else.
 
 ## Performance
@@ -249,24 +257,28 @@ typing speed.
   apostrophe unshifted is `dead_acute` but apostrophe *shifted* is
   `dead_diaeresis`.
 
-  Two attempts were made to fix this properly (see git history) and both
-  failed the same way: an external script tried to synthetically release
-  Shift via ydotool's own virtual device before re-emitting the trigger
-  key (the first attempt also had a separate, real bug - see below - but
-  even once that was fixed, the output was still wrong). The working
-  theory: keyd exclusively grabs your real keyboard and its own virtual
-  device is the sole thing the compositor sees for it, continuously
-  forwarding whatever Shift state your real key is in. A *different*
-  device (ydotool) asserting "Shift up" doesn't appear to override that -
-  compositors seem to treat a modifier as held if any contributing device
-  asserts it, not "most recent event wins". A real fix would need to
-  happen through keyd's own output stream, and keyd's `macro()` syntax has
-  no documented way to clear/restore a modifier mid-macro. This is left as
-  an accepted trade-off rather than a broken promise - `NATIVE_COMPOSE_LETTERS`
-  stays fast and simple; if this matters for your use case, adapt the
-  `CEDILLA_ACCENTS`/`type-accent.sh` pattern (which correctly handles Shift
-  via a state file check *before* deciding what to emit, not via a
-  post-hoc modifier release) for the affected letters instead.
+  Two attempts were made to fix this via the native-replay path itself
+  (see git history) and both failed the same way: an external script tried
+  to synthetically release Shift via ydotool's own virtual device before
+  re-emitting the trigger key (the first attempt also had a separate, real
+  bug - see below - but even once that was fixed, the output was still
+  wrong). The working theory: keyd exclusively grabs your real keyboard
+  and its own virtual device is the sole thing the compositor sees for it,
+  continuously forwarding whatever Shift state your real key is in. A
+  *different* device (ydotool) asserting "Shift up" doesn't appear to
+  override that - compositors seem to treat a modifier as held if any
+  contributing device asserts it, not "most recent event wins". A fix
+  through the native-replay path itself would need to happen through
+  keyd's own output stream, and keyd's `macro()` syntax has no documented
+  way to clear/restore a modifier mid-macro.
+
+  The `SCRIPT_ACCENTS`/`type-accent.sh` pattern sidesteps this entirely,
+  since it decides the character from a Shift state file check *before*
+  deciding what to emit, rather than replaying a modifiable keycode - this
+  is why `e` ended up there in this project's own config, once `Shift+e`
+  producing `Ë` instead of `É` actually came up in practice.
+  `a`/`i`/`o`/`u` are equally at risk but stayed on the fast native path;
+  move any of them to `SCRIPT_ACCENTS` too if it matters for you.
 - **A real, since-fixed bug from the first fix attempt, documented as a
   warning for future attempts**: routing `NATIVE_COMPOSE_LETTERS` through
   an external script that uses ydotool to re-emit the trigger keycode
@@ -290,7 +302,7 @@ typing speed.
   `DISPLAY=:1 setxkbmap -query` (adjust the display number) against your
   session's real layout. Known affected: WPS Office. Native Wayland apps
   (Chrome, Electron apps, most GTK/Qt-Wayland apps) are unaffected.
-- **Characters routed through `type-accent.sh` (`CEDILLA_ACCENTS`) don't
+- **Characters routed through `type-accent.sh` (`SCRIPT_ACCENTS`) don't
   reliably support "rolling" fast typing** - releasing apostrophe before
   the next key, rather than releasing it first. This is an
   [open, unresolved keyd bug](https://github.com/rvaiya/keyd/issues/756):
@@ -298,7 +310,7 @@ typing speed.
   that follows it. The OS's native XCompose engine doesn't have this
   problem (it's a keysym state machine, not tap/hold-based), which is
   exactly why `NATIVE_COMPOSE_LETTERS` exists - keep as many characters as
-  possible on that path rather than `CEDILLA_ACCENTS`. A different
+  possible on that path rather than `SCRIPT_ACCENTS`. A different
   remapper, [kanata](https://github.com/jtroo/kanata), *can* solve this
   properly (`tap-hold-order`, binding both its tap and hold outcomes to the
   same layer - verified with kanata's `simulated_input` tool), but its own
