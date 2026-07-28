@@ -241,6 +241,20 @@ typing speed.
 
 ## Known limitations
 
+- **Uppercase `NATIVE_COMPOSE_LETTERS` typed with Shift held can come out
+  wrong** - e.g. apostrophe then Shift+e can produce `Ë` instead of the
+  intended `É`. This happens because `macro($TRIGGER_KEY <letter>)` doesn't
+  clear ambient modifiers: if Shift is held for the uppercase letter, it
+  also applies to the synthetic trigger-key emission, and under `us(intl)`
+  apostrophe unshifted is `dead_acute` but apostrophe *shifted* is
+  `dead_diaeresis`. This was deliberately left unfixed - fixing it correctly
+  requires routing through an external script to explicitly manage Shift
+  (the same pattern `type-accent.sh`/`CEDILLA_ACCENTS` uses), which
+  reintroduces real latency for characters that don't otherwise need it.
+  This project prioritizes keeping `NATIVE_COMPOSE_LETTERS` fast and simple
+  over handling this less-common case - if it matters for your use case,
+  adapt the `CEDILLA_ACCENTS`/`type-accent.sh` pattern for the affected
+  letters instead.
 - **Apps running via XWayland (not native Wayland) may not work correctly**,
   even for `NATIVE_COMPOSE_LETTERS`. XWayland keeps its own X11 keyboard
   mapping, separate from the native Wayland session's - on at least one

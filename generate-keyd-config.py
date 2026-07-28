@@ -27,6 +27,20 @@ that cost; everything else should stay on the fast, native path via
 (so the compositor's own keymap treats it as a dead key again, exactly as
 if keyd weren't intercepting it at all) followed by the letter.
 
+Known trade-off of this native path: `macro($TRIGGER_KEY <letter>)` doesn't
+clear ambient modifiers, so holding Shift for an uppercase letter (e.g.
+Shift+e for "É") also applies to the synthetic trigger-key emission - under
+us(intl), apostrophe unshifted is dead_acute but apostrophe *shifted* is
+dead_diaeresis, so this can produce "Ë" instead of "É". Fixing this
+correctly requires routing through an external script (à la
+type-accent.sh) to explicitly manage Shift around the trigger-key emission,
+which reintroduces real latency (~50-100ms) for characters that don't
+otherwise need it. This project intentionally keeps
+NATIVE_COMPOSE_LETTERS on the fast, simple, occasionally-wrong-on-uppercase
+path rather than the slower, always-correct one - if you'd rather have it
+always correct, look at how CEDILLA_ACCENTS/type-accent.sh do it and adapt
+that pattern for your own letters.
+
 An earlier version of this script routed ALL accented letters through
 type-accent.sh, reasoning that once keyd owns the trigger key at all,
 nothing else can compose. That's true for characters you explicitly
@@ -50,16 +64,18 @@ TRIGGER_KEY = "apostrophe"
 TRIGGER_CHAR = "'"
 
 # Characters that Chromium's XCompose bug actually breaks (colliding with a
-# system default, e.g. dead_acute+c defaults to "ć" not "ç"). Only these pay
-# the ~130ms clipboard-paste cost and lose rolling-typing support. Add here
-# ONLY if you've confirmed the character is broken in Chromium - see README.
+# system default, e.g. dead_acute+c defaults to "ç" not "ç"... er, "ć").
+# Only these pay the ~130ms clipboard-paste cost and lose rolling-typing
+# support. Add here ONLY if you've confirmed the character is broken in
+# Chromium - see README.
 CEDILLA_ACCENTS = {
     'c': ('ç', 'Ç'),
 }
 
 # Characters that already compose correctly via the OS's native dead-key
 # handling (in every app, Chromium included) - kept fast and rolling-tolerant
-# by delegating back to it instead of reimplementing them here.
+# by delegating back to it instead of reimplementing them here. See the
+# module docstring for the uppercase-with-Shift trade-off this implies.
 NATIVE_COMPOSE_LETTERS = ['e', 'a', 'i', 'o', 'u']
 
 FALLBACK_LETTERS = [
